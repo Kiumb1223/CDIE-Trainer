@@ -1,0 +1,19 @@
+# -----------------
+# set some hyparameters about 
+# the initialization of relavent model and loss func
+
+version: 'v8'
+
+
+num_classes: 80 
+phi: 'm' # Options: ['n', 's', 'm', 'l', 'x']
+
+bbox:
+  version: ${version}
+  num_classes: ${num_classes}
+  input_shape: [640, 640] # 输入图片的大小，必须为32的倍数。
+
+loss:
+  version: ${version}
+  num_classes: ${num_classes}
+  stride: null

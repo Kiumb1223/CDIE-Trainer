@@ -1,0 +1,39 @@
+# ------------------------
+# 实验配置
+exp:
+  random_seed: 3407     # 随机种子
+
+  log_period: 10        # 每10 iter打印一次信息
+  checkpoint_period: 1  # 每1 epoch保存权重
+  ckpt_save_length: 10  # 最多只保存 10 个历史权重
+  num_workers: 8        # 线程数
+  enable_amp: True      # 开启混精度训练
+  clip_grad_norm: 0.0   # 梯度裁剪
+
+  device: "cuda:0"      # GPU id
+  max_epoch: 40         # 训练的epoch数目
+  batch_size: 16        # 批次大小
+  work_dir: 'exps'      # 实验目录
+
+  lr: 0.001
+  momentum: 0.937
+  weight_decay: 0
+
+  gamma: 0.98
+  
+  # warmup settings
+  # see: https://core-pytorch-utils.readthedocs.io/en/latest/
+  by_epoch: True
+  warmup_t: 800
+  warmup_by_epoch: False
+  warmup_mode: "auto"
+  warmup_init_lr: 0.0
+  warmup_factor: 0.05
+
+defaults:
+  - data: voc
+  - enhancer: gdip
+  - detector: yolov8
+  # 让Hydra不切换工作目录
+  - hydra: hydra
+ 
