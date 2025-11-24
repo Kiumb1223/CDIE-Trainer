@@ -9,9 +9,11 @@
 
 
 
+from .enhancer import * 
+
 __all__ = [
     'build_enhancer'
 ]
 
-def build_enhancer(cfg):
-    pass 
+def build_enhancer(cfg_enhancer):
+    return Enhancer(**cfg_enhancer)

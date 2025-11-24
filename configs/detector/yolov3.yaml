@@ -3,20 +3,49 @@
 # the initialization of relavent model and loss func
 
 version: 'v3'
+input_shape: [416, 416]
+confidence: .5
+nms_iou: .3
+letterbox_image: False 
+classes_path: 'configs/data/voc_classes.txt'
 
-num_classes: 80 
-anchors_mask: [[6, 7, 8], [3, 4, 5], [0, 1, 2]]
+pretrained_weight_path: 'weights/yolov3_coco.pth'
+
+model:
+  version: ${version}
+  num_classes: 20
+  anchors_mask: [[6, 7, 8], [3, 4, 5], [0, 1, 2]]
+
+dataset:
+  version: ${version}
+  input_shape:  ${input_shape}
+  train_data:
+    annotation_path: 'datasets/2007_train.txt'
+    input_shape: ${input_shape}
+    num_classes: ${num_classes}
+    train: True
+    epoch_length: ${exp.max_epoch}
+    mosaic: True 
+    mixup: True 
+  val_data:
+    annotation_path: 'datasets/2007_val.txt'
+    input_shape: ${dataset.input_shape}
+    num_classes: ${num_classes}
+    train: False 
+    # epoch_length: 1
+    mosaic: False
+    mixup: False
 
 bbox:
   version: ${version}
   num_classes: ${num_classes}
-  input_shape: [416, 416]
+  input_shape:  ${input_shape}
   anchors_mask: ${anchors_mask}
 
 loss:
   version: ${version}
   anchors_path: "configs/model/v3/yolo_anchors.txt"
   num_classes: ${num_classes}
-  input_shape: ${bbox.input_shape}
+  input_shape: ${input_shape}
   cuda: True  # 默认使用 GPU，所以 省事设置了True
   anchors_mask: ${anchors_mask}

@@ -5,6 +5,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from loguru import logger 
+
 __all__ = [
     'V3Loss'
 ]
@@ -109,8 +111,16 @@ class V3Loss(nn.Module):
         giou            = iou - (enclose_area - union_area) / enclose_area
         
         return giou
-        
-    def forward(self, l, input, targets=None):
+    
+    def forward(self, preds, targets=None):
+        loss_value_all = 0
+        # 这里直接在 loss 里循环每一层
+        for l, out in enumerate(preds):
+            loss_item = self._forward_single(l, out, targets)
+            loss_value_all += loss_item
+
+        return loss_value_all
+    def _forward_single(self, l, input, targets=None):
         #----------------------------------------------------#
         #   l代表的是，当前输入进来的有效特征层，是第几个有效特征层
         #   input的shape为  bs, 3*(5+num_classes), 13, 13
@@ -442,7 +452,7 @@ def weights_init(net, init_type='normal', init_gain = 0.02):
         elif classname.find('BatchNorm2d') != -1:
             torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
             torch.nn.init.constant_(m.bias.data, 0.0)
-    print('initialize network with %s type' % init_type)
+    logger.info('initialize network with %s type' % init_type)
     net.apply(init_func)
 
 def get_lr_scheduler(lr_decay_type, lr, min_lr, total_iters, warmup_iters_ratio = 0.05, warmup_lr_ratio = 0.1, no_aug_iter_ratio = 0.05, step_num = 10):

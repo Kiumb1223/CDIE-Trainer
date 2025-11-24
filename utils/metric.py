@@ -39,11 +39,13 @@ def occupy_mem(cuda_device, mem_ratio=0.95):
     time.sleep(5)
 
 
-def gpu_mem_usage():
+def gpu_mem_usage(device=None):
     """
     Compute the GPU memory usage for the current device (MB).
     """
-    mem_usage_bytes = torch.cuda.max_memory_allocated()
+    if device is None:
+        device = torch.cuda.current_device()
+    mem_usage_bytes = torch.cuda.memory_allocated(device)
     return mem_usage_bytes / (1024 * 1024)
 
 
@@ -95,28 +97,48 @@ class AverageMeter:
 
 
 class MeterBuffer(defaultdict):
-    """Computes and stores the average and current value"""
-
     def __init__(self, window_size=20):
         factory = functools.partial(AverageMeter, window_size=window_size)
         super().__init__(factory)
+        self._artifacts = {}
 
-    def reset(self):
-        for v in self.values():
-            v.reset()
-
-    def get_filtered_meter(self, filter_key="time"):
-        return {k: v for k, v in self.items() if filter_key in k}
+    @staticmethod
+    def _is_scalar(value):
+        if isinstance(value, (int, float)):
+            return True
+        if isinstance(value, torch.Tensor):
+            return value.numel() == 1
+        if isinstance(value, np.ndarray):
+            return value.size == 1
+        return False
 
     def update(self, values=None, **kwargs):
         if values is None:
             values = {}
         values.update(kwargs)
         for k, v in values.items():
-            if isinstance(v, torch.Tensor):
-                v = v.detach()
-            self[k].update(v)
+            if self._is_scalar(v):
+                if isinstance(v, torch.Tensor):
+                    v = v.detach()
+                self[k].update(v)
+            else:
+                self._artifacts[k] = v
+
+    def get_artifact(self, key, default=None):
+        return self._artifacts.get(key, default)
+
+    def clear_artifacts(self):
+        self._artifacts.clear()
+
+    def reset(self):
+        """清空所有 meters 和 artifacts（删除所有 keys）"""
+        super().clear()
+        self.clear_artifacts()
 
     def clear_meters(self):
-        for v in self.values():
-            v.clear()
+        """清空所有 scalar meters 的历史记录（保留 key）"""
+        for meter in self.values():
+            meter.clear()
+
+    def get_filtered_meter(self, filter_key="time"):
+        return {k: v for k, v in self.items() if filter_key in k}

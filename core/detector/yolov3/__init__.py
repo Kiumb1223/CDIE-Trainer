@@ -13,6 +13,7 @@ import numpy as np
 from .yolo_training import * 
 from .yolov3 import * 
 from .utils_bbox import * 
+from .dataloader import * 
 
 #---------------------------------------------------#
 #   获得先验框

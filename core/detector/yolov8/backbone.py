@@ -5,7 +5,7 @@
 @Time     :     2025/11/21 20:55:34
 @Author   :     Louis Swift
 @Desc     :     
-                Extracted from https://github.com/bubbliiiing/yolov8-pytorch,with minor modification
+                Extracted from https://github.com/bubbliiiing/yolov8-pytorch, with minor modification
                 Thanks for their brilliant works.
 '''
 

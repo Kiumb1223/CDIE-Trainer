@@ -3,17 +3,44 @@
 # the initialization of relavent model and loss func
 
 version: 'v8'
+input_shape: [640, 640]
+confidence: .5
+nms_iou: .3
+letterbox_image: True
+classes_path: 'configs/data/voc_classes.txt'
 
+pretrained_weight_path: 'weights/yolov8_m_coco.pth'
 
-num_classes: 80 
-phi: 'm' # Options: ['n', 's', 'm', 'l', 'x']
+model:
+  version: ${detector.version}
+  num_classes: 20 
+  phi: 'm' # Options: ['n', 's', 'm', 'l', 'x']
+
+dataset:
+  version: ${detector.version}
+  input_shape: ${detector.input_shape}
+  train_data:
+    annotation_path: 'datasets/2007_train.txt'
+    input_shape: ${detector.input_shape}
+    num_classes: ${detector.model.num_classes}
+    train: True
+    epoch_length: ${exp.max_epoch}
+    mosaic: True 
+    mixup: True 
+  val_data:
+    annotation_path: 'datasets/2007_val.txt'
+    input_shape: ${detector.input_shape}
+    num_classes: ${detector.model.num_classes}
+    train: False 
+    # epoch_length: 1
+    mosaic: False
+    mixup: False
 
 bbox:
-  version: ${version}
-  num_classes: ${num_classes}
-  input_shape: [640, 640] # 输入图片的大小，必须为32的倍数。
+  version: ${detector.version}
+  num_classes: ${detector.model.num_classes}
+  input_shape: ${detector.input_shape} # 输入图片的大小，必须为32的倍数。
 
 loss:
-  version: ${version}
-  num_classes: ${num_classes}
-  stride: null
+  version: ${detector.version}
+  num_classes: ${detector.model.num_classes}

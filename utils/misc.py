@@ -72,38 +72,20 @@ def collect_env() -> str:
 def get_model_info(model:torch.nn.Module) -> str:
     '''get model information'''
     model_info = []
+    total_params = 0
 
+    # 遍历模型的每个子模块并计算其参数数量
+    for name, module in model.named_children():
+        module_params = sum(p.numel() for p in module.parameters())
+        model_info.append([name, f'{module_params / 1e6:.2f}M'])
+        total_params += module_params
+
+    # 添加总参数数量
+    model_info.append(['Total Parameters', f'{total_params / 1e6:.2f}M'])
 
     return tabulate(model_info,tablefmt="grid")
 
-def get_model_configuration(model_yaml_path:str) -> str:
-    '''get model configuration '''
 
-    def flatten_dict(d, parent_key='', sep='.'):
-        """
-        Flatten a nested dictionary.
-        
-        :param d: Dictionary to flatten.
-        :param parent_key: The base key for recursion (used for nested keys).
-        :param sep: Separator for flattened keys.
-        :return: A flattened dictionary where keys are combined with `sep`.
-        """
-        items = []
-        for k, v in d.items():
-            new_key = f"{parent_key}{sep}{k}" if parent_key else k
-            if isinstance(v, dict):
-                # Recursively flatten nested dictionaries
-                items.extend(flatten_dict(v, new_key, sep=sep).items())
-            elif isinstance(v,(str,list,tuple,dict)):
-                items.append((new_key, v))
-            else:
-                items.append((new_key, [v]))
-        return dict(items)
-    
-    with open(model_yaml_path, 'r') as f:
-        model_dict = yaml.safe_load(f)
-    flatten_model_dict = flatten_dict(model_dict)
-    return tabulate(flatten_model_dict.items(),headers=['Setting', 'Value'],tablefmt="grid")
 
 def get_exp_info(cfg:OmegaConf) -> str:
     '''get all experimental information for better debugging'''

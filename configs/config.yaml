@@ -10,7 +10,7 @@ exp:
   enable_amp: True      # 开启混精度训练
   clip_grad_norm: 0.0   # 梯度裁剪
 
-  device: "cuda:0"      # GPU id
+  device: "cuda:1"      # GPU id
   max_epoch: 40         # 训练的epoch数目
   batch_size: 16        # 批次大小
   work_dir: 'exps'      # 实验目录
@@ -31,8 +31,9 @@ exp:
   warmup_factor: 0.05
 
 defaults:
-  - data: voc
-  - enhancer: gdip
+  # - data: voc
+  - dsp: DSP
+  - enhancer: basic
   - detector: yolov8
   # 让Hydra不切换工作目录
   - hydra: hydra

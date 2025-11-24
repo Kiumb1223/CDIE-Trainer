@@ -13,8 +13,10 @@ import datetime
 import numpy as np
 import torch.nn as nn
 from loguru import logger
+import torchvision.utils as vutils
 from utils.misc import get_model_info
 from torch.utils.data import DataLoader
+from utils.utils_mAP import get_coco_map
 from torch.nn.utils import clip_grad_norm_
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
@@ -24,6 +26,7 @@ from torch.nn.parallel import DistributedDataParallel
 from utils.distributed import get_rank, get_local_rank,synchronize
 from utils.lr_scheduler import LRWarmupScheduler
 
+
 __all__ = ['Trainer']
 
 class Trainer:
@@ -31,7 +34,7 @@ class Trainer:
         model : nn.Module, 
         optimizer : torch.optim.Optimizer, 
         lr_scheduler : _LRScheduler, 
-        # loss_func : nn.Module,
+        loss_func : nn.Module,
         train_loader :DataLoader, 
         val_loader : DataLoader=None, 
 
@@ -79,6 +82,7 @@ class Trainer:
         
         
         self.ckpt_dir   = os.path.join(self.work_dir, 'checkpoints')
+        # self.mAP_dir   = os.path.join(self.work_dir, 'mAP') # for calc mAP 
         self.tb_log_dir = os.path.join(self.work_dir, 'tb_logs')
 
         self.device     = device if device is not None else 'cpu'
@@ -88,10 +92,11 @@ class Trainer:
             self._ckpt_list= [] 
             self._ckpt_save_length = ckpt_save_length
             self.tbWritter = SummaryWriter(self.tb_log_dir)
-            self._best_f1_score = np.NINF
+            self._min_val_loss = np.NINF
             
             os.makedirs(self.work_dir, exist_ok=True)
             os.makedirs(self.ckpt_dir, exist_ok=True)
+            # os.makedirs(self.mAP_dir, exist_ok=True)
             os.makedirs(self.tb_log_dir, exist_ok=True)
             
 
@@ -202,16 +207,21 @@ class Trainer:
         # Calculate loss
         #---------------------------------#
         with autocast(enabled=self._enable_amp):
-            tra,det,gt_mtx_list = batch
-            tra,det = tra.to(self.device),det.to(self.device)
-            gt_mtx_list   = [i.to(self.device) for i in gt_mtx_list]
+            images, targets  = batch
+            images = images.to(self.device)
+            if isinstance(targets, (list, tuple)):
+                targets = [ann.to(self.device) for ann in targets]
+            else:
+                targets = targets.to(self.device)
+                
             move_time = time.perf_counter()
-            pred_mtx_list = self.model(tra,det)
+
+            output,intermediate_images = self.model(images)
         
         # RuntimeError: torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.
         # Tackle this error by disabling the  Mixed Precision Training 
 
-            losses = self.loss_func(pred_mtx_list,gt_mtx_list)
+            losses = self.loss_func(output,targets)
         
         #---------------------------------#
         # Calculate gradients
@@ -238,6 +248,8 @@ class Trainer:
             data_time=data_end_time - iter_start_time,
             lr=lr,
             loss=losses,
+
+            intermediate_images = intermediate_images
         )
     def after_iter(self):
 
@@ -263,12 +275,28 @@ class Trainer:
             )
 
             logger.info(
-                f"{progress_str} {eta_str} {loss_str} {time_str} max_mem: {gpu_mem_usage():.0f}M " +
+                f"{progress_str} {eta_str} {loss_str} {time_str} max_mem: {gpu_mem_usage(self.device):.0f}M " +
                 f"lr: {self.meter['lr'].latest:.3e}"
             )
             if self.rank == 0:
                 # write to tensorboard
                 self.tbWritter.add_scalar('Train/loss',list(loss_meter.values())[-1].latest, self.cur_total_iter + 1)
+                
+
+                intermediate_images = self.meter.get_artifact('intermediate_images')
+                style_image = intermediate_images.get('style',None) 
+                enhance_image = intermediate_images.get('enhance',None) 
+                if style_image is not None:
+                    self.tbWritter.add_image('grid/style',
+                            vutils.make_grid(style_image, normalize=True, scale_each=True),
+                            self.cur_total_iter+1
+                        )
+                if enhance_image is not None:
+                    self.tbWritter.add_image('grid/enhance',
+                            vutils.make_grid(enhance_image, normalize=True, scale_each=True),
+                            self.cur_total_iter+1
+                        )
+
             # empty the meters
             self.meter.clear_meters()
         
@@ -291,8 +319,7 @@ class Trainer:
             logger.info(f"Loading checkpoint from {path} ...")
             checkpoint = torch.load(path, map_location="cpu")
         else:
-            logger.info("Skip loading checkpoint and Loading pretrained weights of FASTREID")
-            
+            # logger.info("Skip loading checkpoint and Loading pretrained weights of FASTREID")
             
             self.start_epoch = 0
             return
@@ -360,32 +387,29 @@ class Trainer:
         if self.rank == 0:
             logger.info('Start evalution...')
             self.model_or_module.eval()
+            val_loss = []
             #---------------------------------#
             # eval and save the best model 
-            # wait to implement
             #---------------------------------#
-            try:
-                batch = next(self._valid_iter)
-            except StopIteration:
-                self._valid_iter = iter(self.val_loader)
-                batch = next(self._valid_iter)
+            for batch in self.val_loader:
+                images, targets = batch
+                images = images.to(self.device)
+                if isinstance(targets, (list, tuple)):
+                    targets = [ann.to(self.device) for ann in targets]
+                else:
+                    targets = targets.to(self.device)
 
-            with autocast(enabled=self._enable_amp):
-                tra,det,gt_mtx_list = batch
-                tra,det = tra.to(self.device),det.to(self.device)
-                gt_mtx_list   = [i.to(self.device) for i in gt_mtx_list]
-                pred_mtx_list = self.model_or_module(tra,det)
+                output, intermediate_images = self.model(images)
+
+                losses = self.loss_func(output)
             
-            f1_score = []
-            for pred_mtx,gt_mtx in zip(pred_mtx_list,gt_mtx_list):
-                binary_pred_mtx,_,_,_ = hungarian(pred_mtx.cpu().numpy(),0)
-                f1_score.append(compute_f1_score(binary_pred_mtx,gt_mtx.cpu().numpy()))
-            f1_score = np.mean(f1_score)
-            logger.info(f'Evalution -> f1_score: [{f1_score}]')
-            self.tbWritter.add_scalar('Evaluation/f1_score',f1_score,self.cur_epoch)
-            if f1_score >= self._best_f1_score:
-                self._best_f1_score = f1_score
-                self.save_checkpoint(f"bestScore({self._best_f1_score:.2f})_epoch{self.cur_epoch}.pth")
+            val_loss.append(losses)
+            mean_val_loss = np.mean(val_loss)
+            self.tbWritter.add_scalar('Evaluation/val_loss',mean_val_loss,self.cur_epoch)
+
+            if mean_val_loss < self._min_val_loss:
+                self._min_val_loss = mean_val_loss
+                self.save_checkpoint(f"val_loss({self._min_val_loss:.2f})_epoch{self.cur_epoch}.pth")
             self.model_or_module.train()
         synchronize()
     

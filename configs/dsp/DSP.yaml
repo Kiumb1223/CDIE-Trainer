@@ -1,0 +1,14 @@
+# ------------------------------
+# 模型权重载入两种规则
+# 1. 训练模式，只载入 encoder 的权重,并载入 decoder 的预训练权重进行续训
+# 2. 推理模式，载入 所有的权重
+#
+# 具体配置的时候，看是否存在 ckpt_path 路径中的文件是否存在，则切换为推理模式
+
+name: 'DSP'
+repo_path: 'third_party/DomainStylePerturbation'
+
+
+ckpt_path: 'weights/dsp_iter_160000.pth'
+encoder_path: null
+decoder_path: null

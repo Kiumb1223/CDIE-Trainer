@@ -7,11 +7,14 @@
 @Desc     :     
 '''
 
+import os 
+os.environ["HYDRA_FULL_ERROR"] = "1"
 
 import hydra
 import torch
 from loguru import logger
-from omegaconf import Omegaconf
+from core.detector import *
+from omegaconf import OmegaConf
 from torch.optim import Adam,SGD
 from utils.trainer import Trainer
 from utils.logger import setup_logger
@@ -20,12 +23,11 @@ from torch.utils.data import DataLoader
 from core.model import EnhanceDetectNet
 from core.detector import build_det_loss
 from torch.optim.lr_scheduler import MultiStepLR,ExponentialLR
-# from utils.graphDataset import GraphDataset, graph_collate_fn
-from utils.misc import collect_env,get_exp_info,set_random_seed,get_model_configuration
+from utils.misc import collect_env,get_exp_info,set_random_seed
 
 @logger.catch
 @hydra.main(config_path='configs', config_name='config.yaml',version_base=None)
-def main(config:Omegaconf):
+def main(config:OmegaConf):
 
     #---------------------------------#
     #  print some necessary infomation
@@ -33,23 +35,22 @@ def main(config:Omegaconf):
     setup_logger(config.exp.work_dir,get_rank(),f'log_rank{get_rank()}.txt')
     logger.info("Environment info:\n" + collect_env())
     logger.info("Config info:\n" + get_exp_info(config))
-    # logger.info("Model Config:\n" + get_model_configuration(config.MODEL_YAML_PATH))
 
     #---------------------------------#
     #  prepare training
     #---------------------------------#
     set_random_seed(config.exp.random_seed)
-    train_dataset = GraphDataset(config,'Train',True)  # Move tensor to the device specified in config.DEVICE
-    test_dataset  = GraphDataset(config,'Validation')
+    train_dataset,test_dataset, collate_fn = build_dataset(config.detector.dataset)
 
     train_loader  = DataLoader(train_dataset,batch_size=config.exp.batch_size,shuffle=True,pin_memory=True,
-                               num_workers=config.exp.num_workers,collate_fn=graph_collate_fn,drop_last=True)
+                               num_workers=config.exp.num_workers,collate_fn=collate_fn,drop_last=True)
 
-    valid_loader   = DataLoader(test_dataset,batch_size=config.exp.batch_size,shuffle=True,pin_memory=True,
-                               num_workers=config.exp.num_workers,collate_fn=graph_collate_fn,drop_last=True)
+    valid_loader   = DataLoader(test_dataset,batch_size=config.exp.batch_size,shuffle=False,pin_memory=True,
+                               num_workers=config.exp.num_workers,collate_fn=collate_fn,drop_last=True)
     
-    model = EnhanceDetectNet(config.enhancer,config.detector).to(config.DEVICE)
-    
+    model = EnhanceDetectNet(config.enhancer,config.detector,config.dsp).to(config.exp.device)
+    # model.train()
+
     optimizer = Adam(model.parameters(), lr=config.exp.lr,weight_decay=config.exp.weight_decay)
     # lr_scheduler = MultiStepLR(optimizer,milestones=config.MILLESTONES)
     # optimizer = SGD(model.parameters(), lr=config.LR,momentum=config.MOMENTUM,weight_decay=config.WEIGHT_DECAY)
