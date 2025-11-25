@@ -14,45 +14,19 @@ import colorsys
 import numpy as np 
 import torch.nn as nn 
 from torch import Tensor
+from loguru import logger 
 import torch.nn.functional as F 
-from typing import Union,Optional
 from PIL import Image,ImageDraw,ImageFont
+
 
 from .enhaner import * 
 from .detector import *
+from ..utils.utils import resize_image,get_classes
+
 
 __all__ = [
     'EnhanceDetectNet'
 ]
-
-
-#---------------------------------------------------#
-#   对输入图像进行resize
-#---------------------------------------------------#
-def resize_image(image, size, letterbox_image):
-    iw, ih  = image.size
-    w, h    = size
-    if letterbox_image:
-        scale   = min(w/iw, h/ih)
-        nw      = int(iw*scale)
-        nh      = int(ih*scale)
-
-        image   = image.resize((nw,nh), Image.BICUBIC)
-        new_image = Image.new('RGB', size, (128,128,128))
-        new_image.paste(image, ((w-nw)//2, (h-nh)//2))
-    else:
-        new_image = image.resize((w, h), Image.BICUBIC)
-    return new_image
-
-#---------------------------------------------------#
-#   获得类
-#---------------------------------------------------#
-def get_classes(classes_path):
-    with open(classes_path, encoding='utf-8') as f:
-        class_names = f.readlines()
-    class_names = [c.strip() for c in class_names]
-    return class_names, len(class_names)
-
 
 class EnhanceDetectNet(nn.Module):
     def __init__(
@@ -108,7 +82,7 @@ class EnhanceDetectNet(nn.Module):
                 repo_or_dir=cfg_DSP.repo_path,
                 model=cfg_DSP.name,
                 source='local',
-                ckpt_dict = cfg_DSP
+                ckpt_path = cfg_DSP.ckpt_path
             )
 
             # frezon all the parameters in DSP
@@ -125,53 +99,42 @@ class EnhanceDetectNet(nn.Module):
 
     def forward(
             self,
-            x: Union[Tensor,str],
-            # intermediate_dir:Optional[str]=None
+            x: Tensor,
         ):
         """
-
-        Args:
-            x (Union[Tensor,str]):
-                when x is `Tensor`, it goes the training pipeline.
-                when x is `str`, it goes the evaluation pipeline, which means the input `x` is the path of image
-            ~~intermediate_dir (Optional[str], optional): the intermedia directory to save some important data. Defaults to None.~~
-
+            Args:
+                x (Union[Tensor,str]):
+                    when x is `Tensor`, it goes the training pipeline.
+                    when x is `str`, it goes the evaluation pipeline, which means the input `x` is the path of image
         """
 
         intermediate_images = {}
+        intermediate_images['ori'] = x.clone()
 
         if self.training and hasattr(self,'DSP'):
+            
             self.DSP.eval()
             b,c,ori_h,ori_w = x.shape
+
             style_factor = torch.randn(b,512).to(next(self.parameters()).device)
+
             x = F.interpolate(
                 x,
-                size = (256,256),
+                size = (512,512),
                 mode='bilinear',
                 align_corners=False
             ) # bz c 256 256 
+
             transfered_x = self.DSP(x,style_factor)
+
             x = F.interpolate(
                 transfered_x,
                 size = (ori_h,ori_w),
                 mode='bilinear',
                 align_corners=False
             )
+
             intermediate_images['style'] = x.clone()
-        else: # eval mode
-            assert isinstance(x,str)
-            # intermediate_dir = '.' if intermediate_dir is None else intermediate_dir
-            # os.makedirs(intermediate_dir)
-            image_path = copy.deepcopy(x) 
-            image = np.asarray(Image.open(image_path).convert('RGB'))
-            image_shape = np.array(np.shape(image)[0:2])
-            #---------------------------------------------------------#
-            #   给图像增加灰条，实现不失真的resize
-            #   也可以直接resize进行识别
-            #---------------------------------------------------------#
-            image_data = resize_image(image, (self.input_shape[1],self.input_shape[0]), self.letterbox_image)
-            image_data = (image_data / 255.).astype(np.float32)
-            x = torch.from_numpy(np.transpose(image_data,(2,0,1))).unsqueeze(0).to(next(self.parameters()).device) # BCHW
 
         x,gate = self.enhancer(x)
 
@@ -179,40 +142,68 @@ class EnhanceDetectNet(nn.Module):
 
         outputs = self.detector(x)
 
-        if self.training: # train mode 
-            return outputs,intermediate_images
+        return outputs,intermediate_images
 
-        else: # eval mode 
-            
-            outputs = self.bbox_util.decode_box(outputs)
+    @torch.no_grad()
+    def inference(
+            self,
+            image_path: str,
+            bt_mAP: bool,
+            intermediate_dir: str
+        ):
+        """
+        Args:
+            image_path (str): the path to image.
+            bt_mAP (bool): whether to save results in order to calc mAP.
+            intermediate_dir (str): the path of directory to save the results.
+        """                
 
-            #---------------------------------------------------------#
-            #   将预测框进行堆叠，然后进行非极大抑制
-            #---------------------------------------------------------#
-            results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape, 
-                        image_shape, self.letterbox_image, conf_thres = self.confidence, nms_thres = self.nms_iou)
+        logger.info(f'Start to detect the image [{image_path}].')
 
-            if results[0] is None: 
-                return 
+        # 1. preprocess the image 
+        image = np.asarray(Image.open(image_path).convert('RGB')).astype(np.float32) 
+        image_shape = np.array(np.shape(image)[0:2])
+        #---------------------------------------------------------#
+        #   给图像增加灰条，实现不失真的resize
+        #   也可以直接resize进行识别
+        #---------------------------------------------------------#
+        image_data = resize_image(image, (self.input_shape[1],self.input_shape[0]), self.letterbox_image)
+        image_data = (image_data / 255.).astype(np.float32)
+        x = torch.from_numpy(np.transpose(image_data,(2,0,1))).unsqueeze(0).to(next(self.parameters()).device) # BCHW
 
-            # 判断是 YOLOv3（7 列）还是 YOLOv8（6 列）
-            data = results[0]
-            if data.shape[1] == 7:
-                # YOLOv3: x1,y1,x2,y2,obj,cls_prob,cls_id
-                top_boxes = data[:, :4]
-                top_conf = data[:, 4] * data[:, 5]      # obj × class prob
-                top_label = data[:, 6].astype(np.int32)
+        # 2. inference
+        outputs, intermediate_images = self.forward(x)
 
-            elif data.shape[1] == 6:
-                # YOLOv8: x1,y1,x2,y2,conf,cls_id
-                top_boxes = data[:, :4]
-                top_conf = data[:, 4]
-                top_label = data[:, 5].astype(np.int32)
+        outputs = self.bbox_util.decode_box(outputs)
 
-            else:
-                raise ValueError(f"Unknown bbox format with shape {data.shape}")
-            
-            """
+        #---------------------------------------------------------#
+        #   将预测框进行堆叠，然后进行非极大抑制
+        #---------------------------------------------------------#
+        results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape, 
+                    image_shape, self.letterbox_image, conf_thres = self.confidence, nms_thres = self.nms_iou)
+
+        if results[0] is None: 
+            return 
+
+        # 判断是 YOLOv3（7 列）还是 YOLOv8（6 列）
+        data = results[0]
+        if data.shape[1] == 7:
+            # YOLOv3: x1,y1,x2,y2,obj,cls_prob,cls_id
+            top_boxes = data[:, :4]
+            top_conf = data[:, 4] * data[:, 5]      # obj × class prob
+            top_label = data[:, 6].astype(np.int32)
+
+        elif data.shape[1] == 6:
+            # YOLOv8: x1,y1,x2,y2,conf,cls_id
+            top_boxes = data[:, :4]
+            top_conf = data[:, 4]
+            top_label = data[:, 5].astype(np.int32)
+
+        else:
+            raise ValueError(f"Unknown bbox format with shape {data.shape}")
+
+
+        if bt_mAP:
             #---------------------------------------------------------#
             #   保存中间结果，以计算mAP
             #---------------------------------------------------------#
@@ -228,44 +219,41 @@ class EnhanceDetectNet(nn.Module):
                         continue
 
                     f.write("%s %s %s %s %s %s\n" % (predicted_class, score[:6], str(int(left)), str(int(top)), str(int(right)),str(int(bottom))))
-            """
+            
+            logger.info(f"Saved detection results to [{intermediate_dir}/detection-results/{image_name}.txt]")
 
-            #---------------------------------------------------------#
-            #   图像绘制
-            #---------------------------------------------------------#
-            font        = ImageFont.truetype(font='configs/simhei.ttf', size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
-            thickness   = int(max((image.size[0] + image.size[1]) // np.mean(self.input_shape), 1))
-            for i, c in list(enumerate(top_label)):
-                predicted_class = self.class_names[int(c)]
-                box             = top_boxes[i]
-                score           = top_conf[i]
+        #---------------------------------------------------------#
+        #   图像绘制
+        #---------------------------------------------------------#
+        font        = ImageFont.truetype(font='configs/simhei.ttf', size=np.floor(3e-2 * image_shape[1] + 0.5).astype('int32'))
+        thickness   = int(max((image_shape[0] + image_shape[1]) // np.mean(self.input_shape), 1))
+        for i, c in list(enumerate(top_label)):
+            predicted_class = self.class_names[int(c)]
+            box             = top_boxes[i]
+            score           = top_conf[i]
 
-                top, left, bottom, right = box
+            top, left, bottom, right = box
 
-                top     = max(0, np.floor(top).astype('int32'))
-                left    = max(0, np.floor(left).astype('int32'))
-                bottom  = min(image.size[1], np.floor(bottom).astype('int32'))
-                right   = min(image.size[0], np.floor(right).astype('int32'))
+            top     = max(0, np.floor(top).astype('int32'))
+            left    = max(0, np.floor(left).astype('int32'))
+            bottom  = min(image.size[1], np.floor(bottom).astype('int32'))
+            right   = min(image.size[0], np.floor(right).astype('int32'))
 
-                label = '{} {:.2f}'.format(predicted_class, score)
-                draw = ImageDraw.Draw(image)
-                label_size = draw.textsize(label, font)
-                label = label.encode('utf-8')
-                print(label, top, left, bottom, right)
-                
-                if top - label_size[1] >= 0:
-                    text_origin = np.array([left, top - label_size[1]])
-                else:
-                    text_origin = np.array([left, top + 1])
+            label = '{} {:.2f}'.format(predicted_class, score)
+            draw = ImageDraw.Draw(image)
+            label_size = draw.textsize(label, font)
+            label = label.encode('utf-8')
+            # print(label, top, left, bottom, right)
+            
+            if top - label_size[1] >= 0:
+                text_origin = np.array([left, top - label_size[1]])
+            else:
+                text_origin = np.array([left, top + 1])
 
-                for i in range(thickness):
-                    draw.rectangle([left + i, top + i, right - i, bottom - i], outline=self.colors[c])
-                draw.rectangle([tuple(text_origin), tuple(text_origin + label_size)], fill=self.colors[c])
-                draw.text(text_origin, str(label,'UTF-8'), fill=(0, 0, 0), font=font)
-                del draw
+            for i in range(thickness):
+                draw.rectangle([left + i, top + i, right - i, bottom - i], outline=self.colors[c])
+            draw.rectangle([tuple(text_origin), tuple(text_origin + label_size)], fill=self.colors[c])
+            draw.text(text_origin, str(label,'UTF-8'), fill=(0, 0, 0), font=font)
+            del draw
 
-            return image,intermediate_images
-    
-
-    def get_mAP(self,x:Tensor):
-        assert NotImplementedError('waiting to implement')
+        return image,intermediate_images

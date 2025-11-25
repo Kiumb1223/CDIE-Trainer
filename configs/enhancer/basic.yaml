@@ -2,12 +2,10 @@
 type: "multi"  # optional: [single,multi]   
 num_layers: 5 
 
-
 encoder:
   num_layers: ${enhancer.num_layers}
   base_channel: 64
   encoder_output_dim: 256
-
 
 gdip:
   num_of_gates: 3 # Fixed params [identity & bezier & kernel]

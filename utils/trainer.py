@@ -16,7 +16,6 @@ from loguru import logger
 import torchvision.utils as vutils
 from utils.misc import get_model_info
 from torch.utils.data import DataLoader
-from utils.utils_mAP import get_coco_map
 from torch.nn.utils import clip_grad_norm_
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
