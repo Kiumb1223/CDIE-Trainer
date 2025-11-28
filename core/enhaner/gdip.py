@@ -15,6 +15,7 @@
 
 import math 
 import torch
+import torch.nn as nn 
 import torchvision 
 import torch.nn.functional as F 
 
@@ -33,13 +34,20 @@ class GatedDIP(torch.nn.Module):
         super().__init__()
 
         # Gating Module
-        self.gate_module = torch.nn.Sequential(torch.nn.Linear(encoder_output_dim,num_of_gates,bias=True))
+        self.gate_module = nn.Sequential(
+                nn.Linear(encoder_output_dim,num_of_gates,bias=True),
+                nn.Softmax(dim=-1)
+            )
 
         # Filter Module
-        self.bezier_module =torch.nn.Sequential(torch.nn.Linear(encoder_output_dim,12,bias=True))
+        self.bezier_module =nn.Sequential(
+                nn.Linear(encoder_output_dim,12,bias=True)
+            )
 
         self.kernel_size = kernel_size
-        self.kernel_module = torch.nn.Sequential(torch.nn.Linear(encoder_output_dim,6*self.kernel_size**2,bias=True))
+        self.kernel_module = nn.Sequential(
+                nn.Linear(encoder_output_dim,6*self.kernel_size**2,bias=True)
+            )
 
     def tanh01(self,x : torch.tensor):
         """Shifts tanh from the [-1, 1] range to the [0, 1 range] and returns it for the given input. 
@@ -135,7 +143,6 @@ class GatedDIP(torch.nn.Module):
         slope = Dy / (Dx + 1e-30)
         output = (tone_step * slope).sum(dim=2)  # [B, 3, H, W]
 
-
         # Apply gate
         output = output * bezier_gate.view(B, 1, 1, 1)
 
@@ -143,6 +150,7 @@ class GatedDIP(torch.nn.Module):
         output = torch.clamp(output, 0.0, 1.0)
 
         return output
+    
     def kernel(self, x, latent_out, kernel_gate):
         B, C, H, W = x.shape
         assert C == 3, "Only 3-channel supported"
@@ -189,7 +197,6 @@ class GatedDIP(torch.nn.Module):
         kernel_out = self.kernel(x,linear_proj,gate[:,2])
 
         x = identity_out + bezier_out + kernel_out
-
         x = (x-x.min())/(x.max()-x.min())
 
         return x,gate

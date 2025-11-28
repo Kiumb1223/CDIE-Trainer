@@ -21,7 +21,7 @@ from PIL import Image,ImageDraw,ImageFont
 
 from .enhaner import * 
 from .detector import *
-from ..utils.utils import resize_image,get_classes
+from utils.utils import resize_image,get_classes
 
 
 __all__ = [
@@ -85,7 +85,7 @@ class EnhanceDetectNet(nn.Module):
                 ckpt_path = cfg_DSP.ckpt_path
             )
 
-            # frezon all the parameters in DSP
+            # freeze all the parameters in DSP
             for param in self.DSP.parameters():
                 param.requires_grad = False
             self.DSP.eval()

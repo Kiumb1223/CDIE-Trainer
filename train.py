@@ -25,6 +25,7 @@ from core.detector import build_det_loss
 from torch.optim.lr_scheduler import MultiStepLR,ExponentialLR
 from utils.misc import collect_env,get_exp_info,set_random_seed
 
+
 @logger.catch
 @hydra.main(config_path='configs', config_name='config.yaml',version_base=None)
 def main(config:OmegaConf):

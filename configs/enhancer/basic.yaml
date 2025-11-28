@@ -4,6 +4,10 @@ num_layers: 5
 
 encoder:
   num_layers: ${enhancer.num_layers}
+
+  type: "vanilla"   # optional: vanilla star 
+  act_type: "lrelu" # optional: lrelu telu [only useful in the "vanilla" type]
+  use_afpn: True    # whether using AFPN to refine the features
   base_channel: 64
   encoder_output_dim: 256
 

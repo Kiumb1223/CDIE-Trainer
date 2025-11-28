@@ -29,7 +29,7 @@ dataset:
     mixup: True 
   val_data:
     annotation_path: 'datasets/2007_val.txt'
-    input_shape: ${dataset.input_shape}
+    input_shape: ${detector.input_shape}
     num_classes: ${detector.model.num_classes}
     train: False 
     # epoch_length: 1
@@ -40,11 +40,11 @@ bbox:
   version: ${detector.version}
   num_classes: ${detector.model.num_classes}
   input_shape:  ${detector.input_shape}
-  anchors_mask: ${detector.model.anchors_mask}
+  anchors_path: "configs/detector/v3/yolo_anchors.txt"
 
 loss:
   version: ${detector.version}
-  anchors_path: "configs/model/v3/yolo_anchors.txt"
+  anchors_path: ${detector.bbox.anchors_path}
   num_classes: ${detector.model.num_classes}
   input_shape: ${detector.input_shape}
   cuda: True  # 默认使用 GPU，所以 省事设置了True
