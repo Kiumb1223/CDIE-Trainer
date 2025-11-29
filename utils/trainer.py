@@ -400,7 +400,7 @@ class Trainer:
 
                 output, intermediate_images = self.model(images)
 
-                losses = self.loss_func(output)
+                losses = self.loss_func(output,targets)
             
             val_loss.append(losses)
             mean_val_loss = np.mean(val_loss)
