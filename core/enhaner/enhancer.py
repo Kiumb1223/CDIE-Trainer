@@ -7,13 +7,13 @@
 @Desc     :     
 '''
 
-
-import torch
 import torch.nn as nn
+from torch import Tensor
 from omegaconf import OmegaConf
+from kornia.filters import bilateral_blur
 
-from .vision_encoder import VisionEncoder
 from .gdip import GatedDIP
+from .vision_encoder import VisionEncoder
 
 
 __all__ = [
@@ -24,9 +24,10 @@ class Enhancer(nn.Module):
     def __init__(
             self,
             type: str, # optional single,multi
-            num_layers: int,
+            num_dip: int,
             encoder: OmegaConf,
             gdip: OmegaConf,
+            ckpt_path: None,
             **kwargs
         ):
         super().__init__()
@@ -34,27 +35,38 @@ class Enhancer(nn.Module):
         assert type in ['single','multi']
 
         if type == 'single':
-            assert num_layers == 1, 'single type only support one layer'
+            assert num_dip == 1, 'single type only support one GDIP'
 
         self.type = type 
-        self.num_layers = num_layers        
+        self.num_dip = num_dip        
 
         self.vision_encoder = VisionEncoder(**encoder)
 
         if self.type == 'multi':
-            for i in range(num_layers):
+            for i in range(num_dip):
                 self.add_module(
                     f'gdip_{i}',GatedDIP(**gdip)
                 )
         else:
             self.gdip = GatedDIP(**gdip)
 
-    def forward(self,x):
+        if ckpt_path is not None:
+            self.load_state_dict(torch.load(ckpt_path))
+
+    def forward(self,x:Tensor):
+
+        # denoise 
+        x = bilateral_blur(
+            input=x,
+            kernel_size=5,
+            sigma_color=0.1,
+            sigma_space=(2.0,2.0)
+        )
 
         multi_feats_lst = self.vision_encoder(x)
 
         if self.type == 'multi':
-            for i in range(self.num_layers):
+            for i in range(self.num_dip):
                 gdip = getattr(self,f"gdip_{i}")
                 feat = multi_feats_lst[i]
                 x,gate = gdip(x,feat)

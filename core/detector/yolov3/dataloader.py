@@ -1,9 +1,22 @@
-from random import sample, shuffle
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+'''
+@File     :     dataloader.py
+@Time     :     2025/12/05 22:09:18
+@Author   :     Louis Swift
+@Desc     :     
+                考虑到 增强器的损失设置，调整dataset类的数据输出，
+                    - 需输出 原始图像 以及 损坏图像
+                collate_function 同样需要调整
+'''
+
+
 
 import cv2
 import numpy as np
 import torch
 from PIL import Image
+from random import sample, shuffle
 from torch.utils.data.dataset import Dataset
 
 
@@ -33,6 +46,7 @@ class V3Dataset(Dataset):
             annotation_path,
             input_shape,
             num_classes,
+            mode,
             train,
             epoch_length=1,
             mosaic=False,
@@ -51,6 +65,8 @@ class V3Dataset(Dataset):
         self.num_classes        = num_classes
         self.length             = len(self.annotation_lines)
         self.train              = train
+        # 见 yaml 文件配置说明
+        self.mode               = mode 
 
         self.epoch_length       = epoch_length
         self.mosaic             = mosaic

@@ -402,8 +402,9 @@ class Trainer:
 
                 losses = self.loss_func(output,targets)
             
-            val_loss.append(losses)
+            val_loss.append(losses.item())
             mean_val_loss = np.mean(val_loss)
+            logger.info(f'mean_val_loss:{mean_val_loss}.')
             self.tbWritter.add_scalar('Evaluation/val_loss',mean_val_loss,self.cur_epoch)
 
             if mean_val_loss < self._min_val_loss:

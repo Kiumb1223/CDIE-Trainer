@@ -1,13 +1,14 @@
 
 type: "multi"  # optional: [single,multi]   
 num_layers: 5 
+ckpt_path: 'weights/DIP_ep_35.pth'
 
 encoder:
   num_layers: ${enhancer.num_layers}
 
   type: "vanilla"   # optional: vanilla star 
   act_type: "lrelu" # optional: lrelu telu [only useful in the "vanilla" type]
-  use_afpn: True    # whether using AFPN to refine the features
+  use_afpn: False    # whether using AFPN to refine the features
   base_channel: 64
   encoder_output_dim: 256
 
@@ -15,3 +16,9 @@ gdip:
   num_of_gates: 3 # Fixed params [identity & bezier & kernel]
   kernel_size: 9  # hyparameter about kernel filter
   encoder_output_dim: ${enhancer.encoder.encoder_output_dim}
+
+
+loss:
+  lam_l1: 1.
+  lam_msssim: 1.
+  lam_con: 1.

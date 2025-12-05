@@ -12,7 +12,7 @@ exp:
 
   device: "cuda:7"      # GPU id
   max_epoch: 40         # 训练的epoch数目
-  batch_size: 8        # 批次大小
+  batch_size: 8         # 批次大小
   work_dir: 'exps'      # 实验目录
 
   lr: 0.001
@@ -30,10 +30,15 @@ exp:
   warmup_init_lr: 0.0
   warmup_factor: 0.05
 
+# 多任务损失权重设置，更细粒度权重设置见对应yaml
+loss:
+  lambda_dip: 1.
+  lambda_det: 1.
+
 defaults:
   - dsp: DSP
   - enhancer: basic
   - detector: yolov3
   # 让Hydra不切换工作目录
-  - hydra: hydra
+  - hydra: overrides
  

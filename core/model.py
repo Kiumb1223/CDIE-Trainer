@@ -97,6 +97,8 @@ class EnhanceDetectNet(nn.Module):
         self.colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
         self.colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), self.colors))
 
+        logger.info('Complete the Initialization of [EnhanceDetectNet].')
+
     def forward(
             self,
             x: Tensor,
@@ -125,7 +127,7 @@ class EnhanceDetectNet(nn.Module):
                 align_corners=False
             ) # bz c 256 256 
 
-            transfered_x = self.DSP(x,style_factor)
+            transfered_x = self.DSP(x,style_factor,alpha=0.01)
 
             x = F.interpolate(
                 transfered_x,
