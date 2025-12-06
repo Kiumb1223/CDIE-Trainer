@@ -206,8 +206,10 @@ class Trainer:
         # Calculate loss
         #---------------------------------#
         with autocast(enabled=self._enable_amp):
-            images, targets  = batch
-            images = images.to(self.device)
+            damages, gt, targets  = batch
+
+            damages = damages.to(self.device)
+            gt = gt.to(self.device)
             if isinstance(targets, (list, tuple)):
                 targets = [ann.to(self.device) for ann in targets]
             else:
@@ -215,12 +217,16 @@ class Trainer:
                 
             move_time = time.perf_counter()
 
-            output,intermediate_images = self.model(images)
-        
-        # RuntimeError: torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.
-        # Tackle this error by disabling the  Mixed Precision Training 
+            enhance_img,output,intermediate_images = self.model(damages)
 
-            losses = self.loss_func(output,targets)
+            intermediate_images['gt'] = gt 
+
+            losses,losses_dict = self.loss_func(
+                        # 1. dip loss 
+                        enhance_img,gt,damages,
+                        # 2. det loss 
+                        output,targets
+                    )
         
         #---------------------------------#
         # Calculate gradients
@@ -247,7 +253,14 @@ class Trainer:
             data_time=data_end_time - iter_start_time,
             lr=lr,
             loss=losses,
-
+            # -----------------------------------
+            l1 = losses_dict['l1'].detach().cpu().numpy(),
+            msssim = losses_dict['msssim'].detach().cpu().numpy(),
+            contrast = losses_dict['contrast'].detach().cpu().numpy(),
+            dip = losses_dict['dip'].detach().cpu().numpy(),
+            det = losses_dict['det'].detach().cpu().numpy(),
+            # loss_dict = losses_dict, # keys include dip: l1, msssim ,contrast , dip || det 
+            # -----------------------------------
             intermediate_images = intermediate_images
         )
     def after_iter(self):
@@ -279,12 +292,35 @@ class Trainer:
             )
             if self.rank == 0:
                 # write to tensorboard
-                self.tbWritter.add_scalar('Train/loss',list(loss_meter.values())[-1].latest, self.cur_total_iter + 1)
+                l1_meter = self.meter.get_filtered_meter('l1')
+                msssim_meter = self.meter.get_filtered_meter('msssim')
+                contrast_meter = self.meter.get_filtered_meter('contrast')
+                dip_meter = self.meter.get_filtered_meter('dip')
+                det_meter = self.meter.get_filtered_meter('det')
+                self.tbWritter.add_scalar('Train/dip/l1',list(l1_meter.values())[-1].latest, self.cur_total_iter + 1)
+                self.tbWritter.add_scalar('Train/dip/msssim',list(msssim_meter.values())[-1].latest, self.cur_total_iter + 1)
+                self.tbWritter.add_scalar('Train/dip/contrast',list(contrast_meter.values())[-1].latest, self.cur_total_iter + 1)
+                self.tbWritter.add_scalar('Train/dip/total_loss',list(dip_meter.values())[-1].latest, self.cur_total_iter + 1)
+                self.tbWritter.add_scalar('Train/det_loss',list(det_meter.values())[-1].latest, self.cur_total_iter + 1)
+                self.tbWritter.add_scalar('Train/total_loss',list(loss_meter.values())[-1].latest, self.cur_total_iter + 1)
                 
 
                 intermediate_images = self.meter.get_artifact('intermediate_images')
+                gt_image = intermediate_images.get('gt',None) 
+                damaged_image = intermediate_images.get('damaged',None) 
                 style_image = intermediate_images.get('style',None) 
                 enhance_image = intermediate_images.get('enhance',None) 
+                
+                if gt_image is not None:
+                    self.tbWritter.add_image('grid/gt',
+                            vutils.make_grid(gt_image, normalize=True, scale_each=True),
+                            self.cur_total_iter+1
+                        )
+                if damaged_image is not None:
+                    self.tbWritter.add_image('grid/damage',
+                            vutils.make_grid(damaged_image, normalize=True, scale_each=True),
+                            self.cur_total_iter+1
+                        )
                 if style_image is not None:
                     self.tbWritter.add_image('grid/style',
                             vutils.make_grid(style_image, normalize=True, scale_each=True),

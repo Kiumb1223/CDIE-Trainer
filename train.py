@@ -59,8 +59,8 @@ def main(config:OmegaConf):
     # optimizer = SGD(model.parameters(), lr=config.LR,momentum=config.MOMENTUM,weight_decay=config.WEIGHT_DECAY)
     lr_scheduler = ExponentialLR(optimizer,gamma=config.exp.gamma)
 
-    loss_func = Criterion(config.loss,config.detector,config.enhancer)
-
+    loss_func = Criterion(config.loss,config.enhancer,config.detector).to(config.exp.device)
+    loss_func.float()
     trainer = Trainer(
         model=model,optimizer=optimizer,lr_scheduler=lr_scheduler,loss_func=loss_func,
         train_loader=train_loader,val_loader=valid_loader,

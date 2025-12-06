@@ -13,8 +13,9 @@
 
 
 import cv2
-import numpy as np
+import random
 import torch
+import numpy as np
 from PIL import Image
 from random import sample, shuffle
 from torch.utils.data.dataset import Dataset
@@ -50,9 +51,9 @@ class V3Dataset(Dataset):
             train,
             epoch_length=1,
             mosaic=False,
-            mixup=False,
+            # mixup=False,
             mosaic_prob=0.5,
-            mixup_prob=0.5,
+            # mixup_prob=0.5,
             special_aug_ratio=0.7,
             **kwargs
         ):
@@ -66,13 +67,13 @@ class V3Dataset(Dataset):
         self.length             = len(self.annotation_lines)
         self.train              = train
         # 见 yaml 文件配置说明
-        self.mode               = mode 
+        self.modes              = mode 
 
         self.epoch_length       = epoch_length
         self.mosaic             = mosaic
         self.mosaic_prob        = mosaic_prob
-        self.mixup              = mixup
-        self.mixup_prob         = mixup_prob
+        # self.mixup              = mixup
+        # self.mixup_prob         = mixup_prob
         self.special_aug_ratio  = special_aug_ratio
 
         self.epoch_now          = -1   # 训练时外面每个 epoch 需要更新
@@ -96,15 +97,16 @@ class V3Dataset(Dataset):
             lines = sample(self.annotation_lines, 3)
             lines.append(self.annotation_lines[index])
             shuffle(lines)
-            image, box = self.get_random_data_with_Mosaic(
+            damaged,image, box = self.get_random_data_with_Mosaic(
                 lines,
                 self.input_shape[0:2]
             )
 
+            """ deprecated by Louis Swfit
             # Mosaic 之后再做一次 MixUp（可选）
             if self.mixup and self.rand() < self.mixup_prob:
                 mix_line        = sample(self.annotation_lines, 1)[0]
-                image_2, box_2  = self.get_random_data(
+                damaged_v2,image_2, box_2  = self.get_random_data(
                     mix_line,
                     self.input_shape[0:2],
                     random=self.train
@@ -112,15 +114,20 @@ class V3Dataset(Dataset):
                 image, box      = self.get_random_data_with_MixUp(
                     image, box, image_2, box_2
                 )
+            """
         else:
             # 普通随机增强 / 验证时的无随机增强
-            image, box = self.get_random_data(
+            damaged, image, box = self.get_random_data(
                 self.annotation_lines[index],
                 self.input_shape[0:2],
-                random=self.train
+                bt_random=self.train
             )
 
         # 转为 (C, H, W)，并做归一化
+        damaged = np.transpose(
+            preprocess_input(np.array(damaged, dtype=np.float32)),
+            (2, 0, 1)
+        )
         image = np.transpose(
             preprocess_input(np.array(image, dtype=np.float32)),
             (2, 0, 1)
@@ -138,7 +145,7 @@ class V3Dataset(Dataset):
             # 转为 w,h 和中心点
             box[:, 2:4] = box[:, 2:4] - box[:, 0:2]
             box[:, 0:2] = box[:, 0:2] + box[:, 2:4] / 2
-        return image, box
+        return damaged, image, box
 
     def rand(self, a=0, b=1):
         return np.random.rand()*(b-a) + a
@@ -151,12 +158,18 @@ class V3Dataset(Dataset):
             hue=.1,
             sat=0.7,
             val=0.4,
-            random=True
+            bt_random=True
         ):
+        """return : damaged image , gt image , bbox"""
         line    = annotation_line.split()
         #------------------------------#
         #   读取图像并转换成RGB图像
         #------------------------------#
+        mode = random.choice(self.modes)
+        damaged_path = line[0].replace('JPEGImages',mode)
+        damaged = Image.open(damaged_path)
+        damaged = cvtColor(damaged)
+    
         image   = Image.open(line[0])
         image   = cvtColor(image)
         #------------------------------#
@@ -171,7 +184,7 @@ class V3Dataset(Dataset):
             [np.array(list(map(int, b.split(',')))) for b in line[1:]]
         )
 
-        if not random:
+        if not bt_random:
             scale = min(w/iw, h/ih)
             nw = int(iw*scale)
             nh = int(ih*scale)
@@ -181,6 +194,11 @@ class V3Dataset(Dataset):
             #---------------------------------#
             #   将图像多余的部分加上灰条
             #---------------------------------#
+            damaged       = damaged.resize((nw,nh), Image.BICUBIC)
+            new_damaged   = Image.new('RGB', (w,h), (128,128,128))
+            new_damaged.paste(damaged, (dx, dy))
+            damaged_data  = np.array(new_damaged, np.float32)
+
             image       = image.resize((nw,nh), Image.BICUBIC)
             new_image   = Image.new('RGB', (w,h), (128,128,128))
             new_image.paste(image, (dx, dy))
@@ -200,7 +218,7 @@ class V3Dataset(Dataset):
                 box_h = box[:, 3] - box[:, 1]
                 box = box[np.logical_and(box_w>1, box_h>1)] # discard invalid box
 
-            return image_data, box
+            return damaged_data, image_data, box
                 
         #------------------------------------------#
         #   对图像进行缩放并且进行长和宽的扭曲
@@ -213,6 +231,8 @@ class V3Dataset(Dataset):
         else:
             nw = int(scale*w)
             nh = int(nw/new_ar)
+
+        damaged = damaged.resize((nw,nh), Image.BICUBIC)
         image = image.resize((nw,nh), Image.BICUBIC)
 
         #------------------------------------------#
@@ -220,6 +240,10 @@ class V3Dataset(Dataset):
         #------------------------------------------#
         dx = int(self.rand(0, w-nw))
         dy = int(self.rand(0, h-nh))
+        new_damaged = Image.new('RGB', (w,h), (128,128,128))
+        new_damaged.paste(damaged, (dx, dy))
+        damaged = new_damaged
+
         new_image = Image.new('RGB', (w,h), (128,128,128))
         new_image.paste(image, (dx, dy))
         image = new_image
@@ -229,9 +253,13 @@ class V3Dataset(Dataset):
         #------------------------------------------#
         flip = self.rand()<.5
         if flip:
+            damaged = damaged.transpose(Image.FLIP_LEFT_RIGHT)
             image = image.transpose(Image.FLIP_LEFT_RIGHT)
 
+        damaged_data      = np.array(damaged, np.uint8)
         image_data      = np.array(image, np.uint8)
+        
+        """ Deprecated by Louis Swift
         #---------------------------------#
         #   对图像进行色域变换（HSV 抖动）
         #---------------------------------#
@@ -250,6 +278,7 @@ class V3Dataset(Dataset):
             cv2.LUT(val_c, lut_val)
         ))
         image_data = cv2.cvtColor(image_data, cv2.COLOR_HSV2RGB)
+        """
 
         #---------------------------------#
         #   对真实框进行调整
@@ -267,7 +296,7 @@ class V3Dataset(Dataset):
             box_h = box[:, 3] - box[:, 1]
             box = box[np.logical_and(box_w>1, box_h>1)] 
         
-        return image_data, box
+        return damaged_data, image_data, box
 
     # ================== 以下为 Mosaic / MixUp 部分 ================== #
     def merge_bboxes(self, bboxes, cutx, cuty):
@@ -318,14 +347,16 @@ class V3Dataset(Dataset):
             annotation_line,
             input_shape,
             jitter=0.3,
-            hue=.1,
-            sat=0.7,
-            val=0.4
+            # hue=.1,
+            # sat=0.7,
+            # val=0.4
         ):
+        """return : damaged image , gt image , bbox"""
         h, w = input_shape
         min_offset_x = self.rand(0.3, 0.7)
         min_offset_y = self.rand(0.3, 0.7)
 
+        damaged_datas = []
         image_datas = [] 
         box_datas   = []
         index       = 0
@@ -337,6 +368,11 @@ class V3Dataset(Dataset):
             #---------------------------------#
             #   打开图片
             #---------------------------------#
+            mode = random.choice(self.modes)
+            damaged_path = line_content[0].replace('JPEGImages',mode)
+            damaged = Image.open(damaged_path)
+            damaged = cvtColor(damaged)
+
             image = Image.open(line_content[0])
             image = cvtColor(image)
             
@@ -357,6 +393,7 @@ class V3Dataset(Dataset):
             #---------------------------------#
             flip = self.rand()<.5
             if flip and len(box)>0:
+                damaged = damaged.transpose(Image.FLIP_LEFT_RIGHT)
                 image = image.transpose(Image.FLIP_LEFT_RIGHT)
                 box[:, [0,2]] = iw - box[:, [2,0]]
 
@@ -371,7 +408,9 @@ class V3Dataset(Dataset):
             else:
                 nw = int(scale*w)
                 nh = int(nw/new_ar)
+            damaged = damaged.resize((nw, nh), Image.BICUBIC)
             image = image.resize((nw, nh), Image.BICUBIC)
+            
 
             #-----------------------------------------------#
             #   将图片进行放置，分别对应四张分割图片的位置
@@ -388,6 +427,10 @@ class V3Dataset(Dataset):
             elif index == 3:
                 dx = int(w*min_offset_x)
                 dy = int(h*min_offset_y) - nh
+            
+            new_damaged  = Image.new('RGB', (w,h), (128,128,128))
+            new_damaged.paste(damaged, (dx, dy))
+            damaged_data = np.array(new_damaged)
             
             new_image = Image.new('RGB', (w,h), (128,128,128))
             new_image.paste(image, (dx, dy))
@@ -411,6 +454,7 @@ class V3Dataset(Dataset):
                 box_data = np.zeros((len(box),5))
                 box_data[:len(box)] = box
             
+            damaged_datas.append(damaged_data)
             image_datas.append(image_data)
             box_datas.append(box_data)
 
@@ -420,6 +464,14 @@ class V3Dataset(Dataset):
         cutx = int(w * min_offset_x)
         cuty = int(h * min_offset_y)
 
+        new_damaged = np.zeros([h, w, 3])
+        new_damaged[:cuty, :cutx, :] = damaged_datas[0][:cuty, :cutx, :]
+        new_damaged[cuty:, :cutx, :] = damaged_datas[1][cuty:, :cutx, :]
+        new_damaged[cuty:, cutx:, :] = damaged_datas[2][cuty:, cutx:, :]
+        new_damaged[:cuty, cutx:, :] = damaged_datas[3][:cuty, cutx:, :]
+
+        new_damaged = np.array(new_damaged, np.uint8)
+
         new_image = np.zeros([h, w, 3])
         new_image[:cuty, :cutx, :] = image_datas[0][:cuty, :cutx, :]
         new_image[cuty:, :cutx, :] = image_datas[1][cuty:, :cutx, :]
@@ -428,6 +480,8 @@ class V3Dataset(Dataset):
 
         new_image       = np.array(new_image, np.uint8)
 
+
+        """ deprecated by Louis Swift
         #---------------------------------#
         #   对图像进行色域变换（HSV 抖动）
         #---------------------------------#
@@ -446,13 +500,14 @@ class V3Dataset(Dataset):
             cv2.LUT(val_c, lut_val)
         ))
         new_image = cv2.cvtColor(new_image, cv2.COLOR_HSV2RGB)
+        """
 
         #---------------------------------#
         #   对框进行进一步的处理
         #---------------------------------#
         new_boxes = self.merge_bboxes(box_datas, cutx, cuty)
 
-        return new_image, new_boxes
+        return new_damaged , new_image, new_boxes
 
     def get_random_data_with_MixUp(self, image_1, box_1, image_2, box_2):
         new_image = np.array(image_1, np.float32) * 0.5 + \
@@ -468,11 +523,15 @@ class V3Dataset(Dataset):
 
 # DataLoader中collate_fn使用
 def v3_dataset_collate(batch):
+    """return : damaged image , gt image , bbox"""    
+    damages = []
     images = []
     bboxes = []
-    for img, box in batch:
+    for damage,img, box in batch:
+        damages.append(damage)
         images.append(img)
         bboxes.append(box)
+    damages = torch.from_numpy(np.array(damages)).type(torch.FloatTensor)
     images = torch.from_numpy(np.array(images)).type(torch.FloatTensor)
     bboxes = [torch.from_numpy(ann).type(torch.FloatTensor) for ann in bboxes]
-    return images, bboxes
+    return damages,images, bboxes

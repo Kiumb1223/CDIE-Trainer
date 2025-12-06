@@ -111,7 +111,8 @@ class EnhanceDetectNet(nn.Module):
         """
 
         intermediate_images = {}
-        intermediate_images['ori'] = x.clone()
+        # intermediate_images['ori'] = x.clone()
+        intermediate_images['damaged'] = x.clone()
 
         if self.training and hasattr(self,'DSP'):
             
@@ -140,11 +141,11 @@ class EnhanceDetectNet(nn.Module):
 
         x,gate = self.enhancer(x)
 
-        intermediate_images['enhance'] = x.clone()
+        intermediate_images['enhance'] = x
 
         outputs = self.detector(x)
 
-        return outputs,intermediate_images
+        return x, outputs,intermediate_images
 
     @torch.no_grad()
     def inference(

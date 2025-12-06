@@ -19,10 +19,9 @@ model:
 dataset:
   version: ${detector.version}
   input_shape:  ${detector.input_shape}
-  # mode 中的元素分别代表着 存着 原始图片，加雾，弱光的 文件夹名字
+  # mode 中的元素分别代表着 加雾，弱光的 文件夹名字
   # 其中， annotation_path 中默认指向的是 原始图片的 路径
-  # 这里，代码中默认将 第一个元素 当作是 默认的路径 ！
-  mode: ['JPEGImages','fog','dark']  
+  mode: ['fog','dark']  
   train_data:
     annotation_path: 'datasets/2007_train.txt'
     input_shape: ${detector.input_shape}
@@ -31,7 +30,7 @@ dataset:
     train: True
     epoch_length: ${exp.max_epoch}
     mosaic: False
-    mixup: False
+    # mixup: False
   val_data:
     annotation_path: 'datasets/2007_val.txt'
     input_shape: ${detector.input_shape}
@@ -40,7 +39,7 @@ dataset:
     train: False 
     # epoch_length: 1
     mosaic: False
-    mixup: False
+    # mixup: False
 
 bbox:
   version: ${detector.version}
